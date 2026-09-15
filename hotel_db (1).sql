@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Sep 12, 2026 at 08:15 AM
+-- Generation Time: Sep 15, 2026 at 12:25 PM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -20,6 +20,98 @@ SET time_zone = "+00:00";
 --
 -- Database: `hotel_db`
 --
+
+DELIMITER $$
+--
+-- Procedures
+--
+CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_cancel_booking` (IN `p_booking_id` INT, OUT `p_result_message` VARCHAR(255))   BEGIN
+    DECLARE v_room_id INT;
+    DECLARE v_guests INT;
+    DECLARE v_status VARCHAR(20);
+
+    START TRANSACTION;
+
+    SELECT room_id, guests, status INTO v_room_id, v_guests, v_status 
+    FROM bookings WHERE id = p_booking_id;
+
+    IF v_status = 'Cancelled' THEN
+        SET p_result_message = 'FAILED: Booking is already cancelled.';
+        ROLLBACK;
+    ELSEIF v_room_id IS NOT NULL THEN
+        UPDATE bookings SET status = 'Cancelled' WHERE id = p_booking_id;
+        
+        UPDATE rooms SET available = available + v_guests WHERE id = v_room_id;
+        
+        INSERT INTO audit_log (action, details) VALUES ('BOOKING_CANCELLED', CONCAT('Booking ID ', p_booking_id, ' cancelled. Restored ', v_guests, ' capacity.'));
+        
+        SET p_result_message = 'SUCCESS: Booking cancelled and capacity restored.';
+        COMMIT;
+    ELSE
+        SET p_result_message = 'FAILED: Booking not found.';
+        ROLLBACK;
+    END IF;
+END$$
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `sp_create_booking` (IN `p_user_id` INT, IN `p_room_id` INT, IN `p_amount` INT, IN `p_method` VARCHAR(50), IN `p_guests` INT, IN `p_adults` INT, IN `p_children` INT, IN `p_check_in` DATE, IN `p_check_out` DATE, OUT `p_result_message` VARCHAR(255))   BEGIN
+    DECLARE v_avail INT;
+    DECLARE v_room_number VARCHAR(10);
+    DECLARE v_room_type VARCHAR(50);
+    
+    START TRANSACTION;
+
+    SET v_avail = fn_check_room_availability(p_room_id, p_check_in, p_check_out);
+
+    IF v_avail >= p_guests THEN
+        SELECT number, type INTO v_room_number, v_room_type FROM rooms WHERE id = p_room_id;
+
+        INSERT INTO bookings (user_id, room_id, room_number, room_type, amount, method, guests, adults, children, check_in, check_out, status)
+        VALUES (p_user_id, p_room_id, v_room_number, v_room_type, p_amount, p_method, p_guests, p_adults, p_children, p_check_in, p_check_out, 'Verified');
+
+        UPDATE rooms SET available = available - p_guests WHERE id = p_room_id;
+
+        INSERT INTO audit_log (action, details) VALUES ('BOOKING_CREATED', CONCAT('User ', p_user_id, ' booked room ', v_room_number));
+
+        SET p_result_message = 'SUCCESS: Booking confirmed.';
+        COMMIT;
+    ELSE
+        SET p_result_message = 'FAILED: Room does not have enough capacity for these dates.';
+        ROLLBACK;
+    END IF;
+END$$
+
+--
+-- Functions
+--
+CREATE DEFINER=`root`@`localhost` FUNCTION `fn_check_room_availability` (`p_room_id` INT, `p_check_in` DATE, `p_check_out` DATE) RETURNS INT(11) DETERMINISTIC BEGIN
+    DECLARE v_total_capacity INT;
+    DECLARE v_booked_capacity INT;
+
+    SELECT available INTO v_total_capacity FROM rooms WHERE id = p_room_id;
+    
+    SELECT COALESCE(SUM(guests), 0) INTO v_booked_capacity 
+    FROM bookings 
+    WHERE room_id = p_room_id 
+    AND status IN ('Verified', 'Pending')
+    AND (p_check_in <= check_out AND p_check_out >= check_in);
+
+    RETURN v_total_capacity - v_booked_capacity;
+END$$
+
+DELIMITER ;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `audit_log`
+--
+
+CREATE TABLE `audit_log` (
+  `id` int(11) NOT NULL,
+  `action` varchar(50) NOT NULL,
+  `details` text DEFAULT NULL,
+  `logged_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 
@@ -49,18 +141,12 @@ CREATE TABLE `bookings` (
 --
 
 INSERT INTO `bookings` (`id`, `user_id`, `room_id`, `room_number`, `room_type`, `amount`, `method`, `status`, `guests`, `adults`, `children`, `check_in`, `check_out`, `created_at`) VALUES
-(2, 7, 3, '201', 'Deluxe', 5500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-12', '2026-09-14', '2026-09-09 17:25:07'),
-(3, 9, 3, '201', 'Deluxe', 5500, 'Bkash', 'Verified', 2, 1, 1, '2026-09-18', '2026-09-21', '2026-09-09 18:19:11'),
-(4, 10, 2, '102', 'Standard', 3500, 'Bkash', 'Verified', 2, 1, 1, '2026-09-18', '2026-09-19', '2026-09-09 19:10:19'),
-(5, 11, 1, '101', 'Standard', 3500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-17', '2026-09-22', '2026-09-09 19:12:32'),
-(6, 12, 1, '101', 'Standard', 3500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-12', '2026-09-14', '2026-09-09 19:26:04'),
-(7, 13, 2, '102', 'Standard', 3500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-24', '2026-09-29', '2026-09-09 21:02:52'),
-(8, 14, 3, '201', 'Deluxe', 5500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-24', '2026-09-30', '2026-09-09 21:30:11'),
-(9, 15, 1, '101', 'Standard', 3500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-24', '2026-09-22', '2026-09-09 22:29:54'),
-(10, 14, 3, '201', 'Deluxe', 5500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-12', '2026-09-18', '2026-09-09 23:20:42'),
-(11, 15, 1, '101', 'Standard', 3500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-12', '2026-09-18', '2026-09-09 23:24:31'),
-(12, 12, 4, '202', 'Deluxe', 5500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-18', '2026-09-21', '2026-09-09 23:38:34'),
-(13, 9, 1, '101', 'Standard', 3500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-25', '2026-09-29', '2026-09-10 00:10:06');
+(15, 17, 1, '101', 'Standard', 3500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-16', '2026-09-21', '2026-09-13 12:38:52'),
+(16, 17, 1, '101', 'Standard', 3500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-24', '2026-09-28', '2026-09-13 13:36:25'),
+(17, 18, 4, '202', 'Deluxe', 5500, 'Visa/Mastercard', 'Verified', 1, 1, 0, '2026-09-16', '2026-09-22', '2026-09-13 13:51:10'),
+(18, 19, 3, '201', 'Deluxe', 5500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-16', '2026-09-22', '2026-09-14 08:20:02'),
+(19, 20, 1, '101', 'Standard', 3500, 'Bkash', 'Verified', 2, 1, 1, '2026-09-16', '2026-09-24', '2026-09-14 08:27:54'),
+(20, 7, 3, '201', 'Deluxe', 5500, 'Bkash', 'Verified', 1, 1, 0, '2026-09-24', '2026-09-29', '2026-09-14 09:03:12');
 
 -- --------------------------------------------------------
 
@@ -119,7 +205,20 @@ INSERT INTO `requests` (`id`, `user_id`, `type`, `text`, `status`, `created_at`)
 (5, 2, 'wheelchair', 'Wheelchair for Room 301', 'Pending', '2026-09-09 20:38:34'),
 (6, 3, 'food', 'Food (Burger) for Room 301', 'Pending', '2026-09-09 20:40:06'),
 (7, 2, 'transport', '101at 10:00 am', 'Pending', '2026-09-09 22:32:03'),
-(8, 3, 'laundry', '101at 10:00 am', 'Pending', '2026-09-09 22:33:09');
+(8, 3, 'laundry', '101at 10:00 am', 'Pending', '2026-09-09 22:33:09'),
+(9, 16, 'special', 'Extra pillow', 'Pending', '2026-09-12 22:38:56'),
+(10, 17, 'special', 'Extra pillow', 'Pending', '2026-09-13 12:57:33');
+
+--
+-- Triggers `requests`
+--
+DELIMITER $$
+CREATE TRIGGER `trg_after_request_insert` AFTER INSERT ON `requests` FOR EACH ROW BEGIN
+    INSERT INTO audit_log (action, details) 
+    VALUES ('NEW_REQUEST', CONCAT('User ', NEW.user_id, ' requested ', NEW.type, ': ', NEW.text));
+END
+$$
+DELIMITER ;
 
 -- --------------------------------------------------------
 
@@ -146,7 +245,11 @@ INSERT INTO `reviews` (`id`, `user_id`, `booking_id`, `text`, `rating`, `created
 (3, 12, NULL, 'This room is like how i axpected', 5, '2026-09-09 19:26:36'),
 (4, 14, NULL, 'It is a nise room', 5, '2026-09-09 21:30:34'),
 (5, 15, 9, 'This a very comfortable room', 5, '2026-09-09 22:30:43'),
-(6, 9, 13, 'it was a nise room', 5, '2026-09-10 00:17:43');
+(6, 9, 13, 'it was a nise room', 5, '2026-09-10 00:17:43'),
+(7, 16, 14, 'This is really a nise room', 5, '2026-09-12 22:38:33'),
+(8, 17, 15, 'it\'s a good room', 5, '2026-09-13 12:57:56'),
+(9, 18, 17, 'It\'s a nise room', 5, '2026-09-13 13:51:33'),
+(10, 19, 18, 'It is a good room', 5, '2026-09-14 08:20:37');
 
 -- --------------------------------------------------------
 
@@ -175,7 +278,12 @@ INSERT INTO `rooms` (`id`, `number`, `type`, `price`, `guests`, `available`, `am
 (2, '102', 'Standard', 3500, 2, 3, 'Free WiFi, AC, Flat-screen TV', 'A cozy standard room with all essential amenities.', 'https://images.unsplash.com/photo-1611892440504?w=800'),
 (3, '201', 'Deluxe', 5500, 3, 4, 'Free WiFi, AC, Minibar, City View', 'A spacious deluxe room with premium furnishings.', 'https://images.unsplash.com/photo-1590490360182?w=800'),
 (4, '202', 'Deluxe', 5500, 3, 2, 'Free WiFi, AC, Minibar, City View', 'An elegant deluxe room with luxury amenities.', 'https://images.unsplash.com/photo-1566665797739?w=800'),
-(5, '301', 'Presidential Suite', 12000, 4, 1, 'Free WiFi, AC, Minibar, City View, Jacuzzi', 'Our most luxurious suite.', 'https://images.unsplash.com/photo-1582719478250?w=800');
+(5, '301', 'Presidential Suite', 12000, 4, 1, 'Free WiFi, AC, Minibar, City View, Jacuzzi', 'Our most luxurious suite.', 'https://images.unsplash.com/photo-1582719478250?w=800'),
+(6, '101', 'Standard', 3500, 2, 5, 'Free WiFi, AC, Flat-screen TV', 'A comfortable standard room.', 'https://images.unsplash.com/photo-1631049307264?w=800'),
+(7, '102', 'Standard', 3500, 2, 3, 'Free WiFi, AC, Flat-screen TV', 'A cozy standard room.', 'https://images.unsplash.com/photo-1611892440504?w=800'),
+(8, '201', 'Deluxe', 5500, 3, 4, 'Free WiFi, AC, Minibar, City View', 'A spacious deluxe room.', 'https://images.unsplash.com/photo-1590490360182?w=800'),
+(9, '202', 'Deluxe', 5500, 3, 2, 'Free WiFi, AC, Minibar, City View', 'An elegant deluxe room with luxury amenities.', 'https://images.unsplash.com/photo-1566665797739?w=800'),
+(10, '301', 'Presidential Suite', 12000, 4, 1, 'Free WiFi, AC, Minibar, City View, Jacuzzi', 'Our most luxurious suite.', 'https://images.unsplash.com/photo-1582719478250?w=800');
 
 -- --------------------------------------------------------
 
@@ -211,18 +319,30 @@ INSERT INTO `users` (`id`, `full_name`, `email`, `username`, `password_hash`, `r
 (12, 'Akbor Ali', 'akbor@gmail.com', 'Akbor', '$2y$10$O1zdhLE6QuqD660j5Kxhve7cMpLLrMiQZYgieeXI2nh1yeR552gCi', 'customer', '2026-09-09 19:25:35'),
 (13, 'Badol Ahmed', 'badol@gmail.com', 'Badol', '$2y$10$Wf6wQikMI4wcgXqsy7PaVuHDOLmL2y/lxEX5m0RJcRbKXTqSkqdvK', 'customer', '2026-09-09 20:55:24'),
 (14, 'Shofik Uddin', 'shofik@gmail.com', 'Shofik', '$2y$10$/0tBdjkvV2g/hPFXSyX49Og912s9rRD5b5cH3HPPyd0/Ji/nE6Jiy', 'customer', '2026-09-09 21:29:46'),
-(15, 'Rahim Uddin', 'rahim@gmail.com', 'Rahim', '$2y$10$kGFX8OFo7XCc5zLbaPAnl.EsVuGV4R316L5dcu9yc2Zq/Q2orn/1u', 'customer', '2026-09-09 22:29:25');
+(15, 'Rahim Uddin', 'rahim@gmail.com', 'Rahim', '$2y$10$kGFX8OFo7XCc5zLbaPAnl.EsVuGV4R316L5dcu9yc2Zq/Q2orn/1u', 'customer', '2026-09-09 22:29:25'),
+(16, 'Sadik Hasan', 'sadik@gmail.com', 'Sadik', '$2y$10$IaWchPJhDUt1jCL6EzDA2uZfOwe8lYC0hx5ZRFb9fEXGdMDkuzunm', 'customer', '2026-09-12 22:37:40'),
+(17, 'Jon Doe', 'jon@gmail.com', 'Jon', '$2y$10$hFLPGADUmcuBqNkNQrsuY..7X6CxTIs5ARzDA2/EUdfZv4jDLmc7C', 'customer', '2026-09-13 12:34:52'),
+(18, 'Miceal Collins', 'miceal@gmail.com', 'Miceal', '$2y$10$EH2gsqBkOFpQ5rENsURkEOLpkNo0wvns7NNe0kmAhMPmUXveDn3Tq', 'customer', '2026-09-13 13:50:38'),
+(19, 'Akib Hossain', 'akib@gmail.com', 'Akib', '$2y$10$XtIl1N.peouSXmrR6L3qEuYikXECND/1.iVftSxHcp5zHEztTQ/ai', 'customer', '2026-09-14 08:19:16'),
+(20, 'tt', 'gggg@gmail.com', 'tt', '$2y$10$YnnBCf8HhbBcbuHu6lS4EOioGbAJvRPuFI86iT43.IXeHGLZtHHGO', 'customer', '2026-09-14 08:26:21');
 
 --
 -- Indexes for dumped tables
 --
 
 --
+-- Indexes for table `audit_log`
+--
+ALTER TABLE `audit_log`
+  ADD PRIMARY KEY (`id`);
+
+--
 -- Indexes for table `bookings`
 --
 ALTER TABLE `bookings`
   ADD PRIMARY KEY (`id`),
-  ADD KEY `user_id` (`user_id`);
+  ADD KEY `user_id` (`user_id`),
+  ADD KEY `bookings_ibfk_2` (`room_id`);
 
 --
 -- Indexes for table `damages`
@@ -268,10 +388,16 @@ ALTER TABLE `users`
 --
 
 --
+-- AUTO_INCREMENT for table `audit_log`
+--
+ALTER TABLE `audit_log`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
 -- AUTO_INCREMENT for table `bookings`
 --
 ALTER TABLE `bookings`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=14;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=21;
 
 --
 -- AUTO_INCREMENT for table `damages`
@@ -289,25 +415,25 @@ ALTER TABLE `messages`
 -- AUTO_INCREMENT for table `requests`
 --
 ALTER TABLE `requests`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=9;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
 
 --
 -- AUTO_INCREMENT for table `reviews`
 --
 ALTER TABLE `reviews`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
 
 --
 -- AUTO_INCREMENT for table `rooms`
 --
 ALTER TABLE `rooms`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
 
 --
 -- AUTO_INCREMENT for table `users`
 --
 ALTER TABLE `users`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=16;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=24;
 
 --
 -- Constraints for dumped tables
@@ -317,7 +443,8 @@ ALTER TABLE `users`
 -- Constraints for table `bookings`
 --
 ALTER TABLE `bookings`
-  ADD CONSTRAINT `bookings_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+  ADD CONSTRAINT `bookings_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `bookings_ibfk_2` FOREIGN KEY (`room_id`) REFERENCES `rooms` (`id`) ON DELETE SET NULL;
 
 --
 -- Constraints for table `reviews`

@@ -1,82 +1,41 @@
-
 <?php
-require_once 'config.php';
+session_start();
+require_once __DIR__ . '/models.php';
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
-    header('Location: login.php');
+if (!is_logged_in() || get_user_role() !== 'admin') {
+    header("Location: login.php");
     exit;
 }
 
-$action = $_GET['action'] ?? $_POST['action'] ?? '';
+$action = $_POST['action'] ?? $_GET['action'] ?? '';
+$response = null;
 
-if ($action === 'delete_user') {
-    $id = (int)($_GET['id'] ?? 0);
-    if ($id > 0) {
-        $stmt = mysqli_prepare($conn, "DELETE FROM users WHERE id = ?");
-        mysqli_stmt_bind_param($stmt, "i", $id);
-        mysqli_stmt_execute($stmt);
-        mysqli_stmt_close($stmt);
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if ($action === 'create_booking') {
+        $user_id = (int)$_POST['user_id'];
+        $room_id = (int)$_POST['room_id'];
+        $amount = (int)$_POST['amount'];
+        $method = htmlspecialchars($_POST['method']);
+        $guests = (int)$_POST['guests'];
+        $adults = (int)$_POST['adults'];
+        $children = (int)$_POST['children'];
+        $check_in = $_POST['check_in'];
+        $check_out = $_POST['check_out'];
+
+        $response = createBooking($user_id, $room_id, $amount, $method, $guests, $adults, $children, $check_in, $check_out);
+    } 
+    
+    elseif ($action === 'cancel_booking') {
+        $booking_id = (int)$_POST['booking_id'];
+        $response = cancelBooking($booking_id);
     }
-    header('Location: admin/dashboard.php');
-    exit;
 }
 
-if ($action === 'delete_multiple_users') {
-    $ids = $_POST['ids'] ?? [];
-    if (!empty($ids)) {
-        $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $types = str_repeat('i', count($ids));
-        $stmt = mysqli_prepare($conn, "DELETE FROM users WHERE id IN ($placeholders)");
-        mysqli_stmt_bind_param($stmt, $types, ...$ids);
-        mysqli_stmt_execute($stmt);
-        mysqli_stmt_close($stmt);
-    }
-    header('Location: admin/dashboard.php');
-    exit;
+if ($response) {
+    $_SESSION['flash_message'] = $response['message'];
+    $_SESSION['flash_type'] = $response['success'] ? 'success' : 'error';
 }
 
-if ($action === 'delete_booking') {
-    $id = (int)($_GET['id'] ?? 0);
-    if ($id > 0) {
-        $stmt = mysqli_prepare($conn, "DELETE FROM bookings WHERE id = ?");
-        mysqli_stmt_bind_param($stmt, "i", $id);
-        mysqli_stmt_execute($stmt);
-        mysqli_stmt_close($stmt);
-    }
-    header('Location: admin/dashboard.php');
-    exit;
-}
-
-if ($action === 'delete_multiple_bookings') {
-    $ids = $_POST['ids'] ?? [];
-    if (!empty($ids)) {
-        $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $types = str_repeat('i', count($ids));
-        $stmt = mysqli_prepare($conn, "DELETE FROM bookings WHERE id IN ($placeholders)");
-        mysqli_stmt_bind_param($stmt, $types, ...$ids);
-        mysqli_stmt_execute($stmt);
-        mysqli_stmt_close($stmt);
-    }
-    header('Location: admin/dashboard.php');
-    exit;
-}
-
-if ($action === 'delete_damage') {
-    $id = (int)($_GET['id'] ?? 0);
-    if ($id > 0) {
-        $stmt = mysqli_prepare($conn, "DELETE FROM damages WHERE id = ?");
-        mysqli_stmt_bind_param($stmt, "i", $id);
-        mysqli_stmt_execute($stmt);
-        mysqli_stmt_close($stmt);
-    }
-    header('Location: admin/dashboard.php');
-    exit;
-}
-
-header('Location: admin/dashboard.php');
+header("Location: dashboard.php");
 exit;
 ?>

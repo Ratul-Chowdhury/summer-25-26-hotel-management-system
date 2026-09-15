@@ -91,7 +91,6 @@ mysqli_stmt_close($stmt);
                 <div class="dashboard-tabs">
                     <button class="tab-btn active" onclick="showTab('cust_book')">My Bookings</button>
                     <button class="tab-btn" onclick="showTab('cust_req')">Special Requests</button>
-                    <button class="tab-btn" onclick="showTab('cust_rev')">My Reviews</button>
                 </div>
 
                 <div id="cust_book" class="tab-content active">
@@ -110,11 +109,6 @@ mysqli_stmt_close($stmt);
                     </form>
                     <h3 style="margin-top:30px;">My Past Requests</h3>
                     <div id="requestsTable"></div>
-                </div>
-
-                <div id="cust_rev" class="tab-content">
-                    <h3>My Reviews</h3>
-                    <div id="reviewsTable"></div>
                 </div>
 
             <?php elseif ($role === 'receptionist'): ?>

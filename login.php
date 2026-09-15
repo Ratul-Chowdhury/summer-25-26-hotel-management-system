@@ -5,8 +5,13 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// FIX: Check role before redirecting already logged-in users
 if (isset($_SESSION['user_id'])) {
-    header('Location: admin/dashboard.php');
+    if ($_SESSION['role'] === 'customer') {
+        header('Location: rooms.php');
+    } else {
+        header('Location: admin/dashboard.php');
+    }
     exit;
 }
 
@@ -66,14 +71,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <h2>Log In</h2>
 
             <?php if ($error) : ?>
-                <p class="error"><?= htmlspecialchars($error) ?></p>
+                <p class="error"><?= e($error) ?></p>
             <?php endif; ?>
 
             <form method="post" action="login.php">
                 <p>
                     <label>Username or Email</label><br>
-                    <!-- FIXED: Replaced e() with htmlspecialchars() -->
-                    <input type="text" name="identifier" value="<?= htmlspecialchars($identifier) ?>" required>
+                    <input type="text" name="identifier" value="<?= e($identifier) ?>" required>
                 </p>
                 <p>
                     <label>Password</label><br>
